@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Typing Game 2.0</title>
+<style>
+:root{
+  --bg:#0f1724;--card:#0b1220;--accent:#06b6d4;--good:#16a34a;--bad:#ef4444;--text:#e6eef6;
+}
+body.light{--bg:#f3f4f6;--card:#fff;--accent:#0284c7;--good:#15803d;--bad:#dc2626;--text:#0f1724;}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:Inter,system-ui,Segoe UI,Roboto,Arial;
+  display:flex;align-items:center;justify-content:center;min-height:100vh;transition:.4s;
+}
+.card{
+  width:100%;max-width:900px;background:var(--card);border-radius:16px;
+  padding:24px;box-shadow:0 8px 30px rgba(0,0,0,0.3);transition:.4s;
+}
+h1{text-align:center;margin:0 0 12px 0;}
+.controls{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
+button{
+  background:transparent;border:1px solid rgba(255,255,255,0.1);
+  padding:8px 14px;border-radius:10px;color:var(--accent);
+  cursor:pointer;font-size:15px;margin-top:8px;transition:.2s;
+}
+body.light button{border-color:rgba(0,0,0,0.1);}
+button:hover{background:rgba(255,255,255,0.05);}
+.sentenceBox{
+  background:rgba(255,255,255,0.02);padding:18px;border-radius:10px;
+  min-height:80px;margin-bottom:12px;font-size:18px;line-height:1.6;transition:.4s;
+}
+body.light .sentenceBox{background:rgba(0,0,0,0.03);}
+.char{padding:0 1px;border-radius:3px;}
+.char.correct{color:var(--good);}
+.char.wrong{color:var(--bad);}
+textarea{
+  width:100%;min-height:90px;padding:10px;border-radius:10px;
+  background:transparent;border:1px solid rgba(255,255,255,0.1);
+  color:inherit;resize:none;font-size:16px;
+}
+body.light textarea{border-color:rgba(0,0,0,0.1);}
+.stats{display:flex;gap:16px;justify-content:center;margin-top:12px;flex-wrap:wrap;}
+.stat{background:rgba(255,255,255,0.02);padding:10px 14px;border-radius:8px;font-size:14px;}
+body.light .stat{background:rgba(0,0,0,0.05);}
+.progressWrap{height:10px;background:rgba(255,255,255,0.03);
+  border-radius:999px;overflow:hidden;margin-top:10px;}
+body.light .progressWrap{background:rgba(0,0,0,0.1);}
+.progress{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#22c1c3);
+  transition:width .2s linear;}
+.leaderboard{margin-top:20px;}
+.leaderboard h3{text-align:center;margin-bottom:6px;}
+table{width:100%;border-collapse:collapse;font-size:14px;}
+th,td{text-align:center;padding:6px;border-bottom:1px solid rgba(255,255,255,0.05);}
+body.light th,body.light td{border-color:rgba(0,0,0,0.1);}
+canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+<div class="card">
+  <div class="controls">
+    <button id="startBtn">▶️ Start Round</button>
+    <div>
+      <button id="themeBtn">🌙 Toggle Theme</button>
+      <button id="musicBtn">🎵 Music Off</button>
+    </div>
+  </div>
+  <h1>🔥 Typing Game 2.0</h1>
+  <div class="sentenceBox"><div id="sentence"></div></div>
+  <textarea id="typed" placeholder="Type all sentences here..." disabled></textarea>
+  <div class="progressWrap"><div id="progress" class="progress"></div></div>
+  <div class="stats">
+    <div class="stat">⏱ Time: <span id="time">0.00s</span></div>
+    <div class="stat">⚡ WPM: <span id="wpm">0.00</span></div>
+    <div class="stat">🎯 Accuracy: <span id="acc">0.00%</span></div>
+  </div>
+  <div class="leaderboard">
+    <h3>🏆 Top 5 Leaderboard</h3>
+    <table id="lbTable"><thead><tr><th>#</th><th>WPM</th><th>Accuracy</th><th>Time</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+
+<audio id="bgMusic" loop>
+  <source src="https://cdn.pixabay.com/audio/2022/03/15/audio_43b7c6934d.mp3" type="audio/mpeg">
+</audio>
+<audio id="keySound">
+  <source src="https://cdn.pixabay.com/audio/2022/03/15/audio_2844f2eb0e.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+(() => {
+
+let allSentences = [];
+
+async function loadSentences() {
+ const response = await fetch("sentences.txt");
+    const text = await response.text();
+    allSentences = text.split(/\r?\n/).filter(line => line.trim() !== "");
+    console.log("✅ Loaded", allSentences.length, "sentences from file");
+}
+
+let started=false,startTime,timerInterval,currentText="";
+const sEl=document.getElementById("sentence");
+const tEl=document.getElementById("typed");
+const timeEl=document.getElementById("time");
+const wpmEl=document.getElementById("wpm");
+const accEl=document.getElementById("acc");
+const progress=document.getElementById("progress");
+const startBtn=document.getElementById("startBtn");
+const bgm=document.getElementById("bgMusic");
+const keySound=document.getElementById("keySound");
+const musicBtn=document.getElementById("musicBtn");
+const themeBtn=document.getElementById("themeBtn");
+const lbTable=document.getElementById("lbTable").querySelector("tbody");
+
+function getRandomSentences(n=3){return[...allSentences].sort(()=>Math.random()-0.5).slice(0,n).join(" ");}
+
+function renderSentence(txt){
+ sEl.innerHTML=[...txt].map(ch=>`<span class='char'>${ch.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</span>`).join("");
+}
+function startRound(){
+ if(allSentences.length===0){alert("Sentences not loaded yet!");return;}
+ currentText=getRandomSentences(3);
+ renderSentence(currentText);
+ tEl.value="";tEl.disabled=false;tEl.focus();
+ started=true;startTime=performance.now();
+ if(timerInterval)clearInterval(timerInterval);
+ timerInterval=setInterval(updateMetrics,100);
+}
+function finishRound(){
+ if(!started)return;started=false;clearInterval(timerInterval);
+ const end=performance.now();
+ const timeTaken=(end-startTime)/1000;
+ const words=currentText.trim().split(/\s+/).length;
+ const wpm=(words/timeTaken)*60;
+ let correct=0;
+ for(let i=0;i<Math.min(tEl.value.length,currentText.length);i++)
+   if(tEl.value[i]===currentText[i])correct++;
+ const acc=(correct/currentText.length)*100;
+ timeEl.textContent=timeTaken.toFixed(2)+"s";
+ wpmEl.textContent=wpm.toFixed(2);
+ accEl.textContent=acc.toFixed(2)+"%";
+ tEl.disabled=true;
+ saveLeaderboard(wpm,acc,timeTaken);
+ confetti();
+ renderLeaderboard();
+}
+function updateMetrics(){
+ if(!started)return;
+ const now=performance.now();
+ const elapsed=(now-startTime)/1000;
+ const words=currentText.trim().split(/\s+/).length;
+ const wpm=(words/elapsed)*60;
+ let correct=0;
+ for(let i=0;i<Math.min(tEl.value.length,currentText.length);i++)
+   if(tEl.value[i]===currentText[i])correct++;
+ const acc=(correct/currentText.length)*100;
+ const prog=Math.min((tEl.value.length/currentText.length)*100,100);
+ progress.style.width=prog+"%";
+ timeEl.textContent=elapsed.toFixed(2)+"s";
+ wpmEl.textContent=wpm.toFixed(2);
+ accEl.textContent=acc.toFixed(2)+"%";
+ updateHighlights(tEl.value);
+}
+function updateHighlights(typed){
+ const chars=sEl.querySelectorAll(".char");
+ const text=currentText;
+ chars.forEach((el,i)=>{
+  el.classList.remove("correct","wrong");
+  if(i<typed.length){
+   if(typed[i]===text[i])el.classList.add("correct");
+   else el.classList.add("wrong");
+  }
+ });
+}
+tEl.addEventListener("keydown",e=>{
+ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();finishRound();}
+ else keySound.currentTime=0,keySound.play();
+});
+tEl.addEventListener("input",()=>{if(!started)return;updateHighlights(tEl.value);});
+startBtn.addEventListener("click",startRound);
+
+// 🎵 Music toggle
+let musicOn=false;
+musicBtn.addEventListener("click",()=>{
+ musicOn=!musicOn;
+ if(musicOn){bgm.play();musicBtn.textContent="🎵 Music On";}
+ else{bgm.pause();musicBtn.textContent="🎵 Music Off";}
+});
+
+// 🌗 Theme toggle
+themeBtn.addEventListener("click",()=>{
+ document.body.classList.toggle("light");
+ themeBtn.textContent=document.body.classList.contains("light")?"🌞 Light Mode":"🌙 Dark Mode";
+});
+
+// 🏆 Leaderboard
+function saveLeaderboard(wpm,acc,time){
+ let lb=JSON.parse(localStorage.getItem("typingLeaderboard")||"[]");
+ lb.push({wpm,acc,time});
+ lb.sort((a,b)=>b.wpm-a.wpm);
+ lb=lb.slice(0,5);
+ localStorage.setItem("typingLeaderboard",JSON.stringify(lb));
+}
+function renderLeaderboard(){
+ let lb=JSON.parse(localStorage.getItem("typingLeaderboard")||"[]");
+ lbTable.innerHTML=lb.map((x,i)=>`<tr><td>${i+1}</td><td>${x.wpm.toFixed(2)}</td><td>${x.acc.toFixed(2)}%</td><td>${x.time.toFixed(2)}s</td></tr>`).join("");
+}
+renderLeaderboard();
+
+// 🎉 Confetti
+const canvas=document.getElementById("confetti");
+const ctx=canvas.getContext("2d");
+let pieces=[];
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
+window.addEventListener("resize",resize);resize();
+function confetti(){
+ pieces=[];
+ const colors=["#06b6d4","#22c55e","#eab308","#f97316","#ef4444"];
+ for(let i=0;i<80;i++)pieces.push({
+  x:Math.random()*canvas.width,y:Math.random()*-canvas.height,
+  vx:(Math.random()-.5)*2,vy:1+Math.random()*3,r:6+Math.random()*6,
+  color:colors[Math.floor(Math.random()*colors.length)],rot:Math.random()*360
+ });
+ requestAnimationFrame(drawConfetti);
+ setTimeout(()=>pieces=[],4000);
+}
+function drawConfetti(){
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ pieces.forEach(p=>{
+  p.x+=p.vx;p.y+=p.vy;p.rot+=2;
+  ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot*Math.PI/180);
+  ctx.fillStyle=p.color;ctx.fillRect(-p.r/2,-p.r/2,p.r,p.r*.6);ctx.restore();
+ });
+ if(pieces.length)requestAnimationFrame(drawConfetti);
+}
+
+window.addEventListener("DOMContentLoaded", loadSentences);
+renderSentence("Press 'Start Round' to begin!");
+})();
+</script>
+</body>
+</html>
